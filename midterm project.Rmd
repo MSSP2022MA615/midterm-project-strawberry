@@ -1,0 +1,157 @@
+---
+title: "midterm project"
+author: "Hao He"
+date: "2022-11-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(magrittr)
+library(readxl)
+```
+
+# Read in data and pre-processing
+
+## Examine the columns 
+```{r strawberries}
+strawb <- read_xlsx("strawberries-2022oct30-a.xlsx", col_names = TRUE)
+
+# Get the column names and index them
+cnames <- colnames(strawb)
+x <- 1:dim(strawb)[2]
+
+```
+
+Create an indicator T to check the unique values of each one of the columns, and then use T to select columns to drop
+```{r}
+T <- NULL
+for(i in x){T <- c(T, dim(unique(strawb[i]))[1])}
+drop_cols <- cnames[which(T == 1)]
+strawb %<>% select(!all_of(drop_cols))
+
+# Arrange columns by year and state
+strawb %<>% arrange(Year, State)
+
+```
+
+
+Now look at the `Data Item` column, it has a couple columns packed into one. We should use separate() to split it up into 3 or 4 columns.
+```{r}
+# colnames(strawb)
+temp1 <- strawb %>% select(`Data Item`) %>% 
+         distinct()
+# 3 columns
+strawb2 <- strawb %>% separate(col=`Data Item`,
+                into = c("Strawberries", "items", "units"),
+                sep = ",",
+                fill = "right")
+
+# Warning says discarding additional info, so we need 4 columns
+strawb3 <- strawb %>% separate(col=`Data Item`,
+            into = c("Strawberries", "type", "items", "units"),
+                               sep = ",",
+                               fill = "right")
+
+# For `strawberries` column, we may have to use separate again to split up the `price received` part in further analysis, if we want to compare to price received data.
+temp2 <- strawb3 %>% select(Strawberries) %>% 
+  distinct()
+
+```
+
+
+## Create susbets: organic strawberries, non-organic strawberries, chemicals used in strawberries.
+Looking at the `domain category` column, it may be better to break down the strawberry dataset into subsets for further analysis on organic vs non-organic, and commercials vs chemicals used in strawberries.
+
+Let's create the organic and non-organic strawberries subsets first.
+```{r}
+# type: 62 rows
+type_organic <- strawb3 %>% filter(grepl("organic", 
+               .$type, 
+               ignore.case = T))
+
+# zero rows returned 
+items_organic <- strawb3 %>% filter(grepl("organic", 
+                      .$items, 
+                      ignore.case = T))  
+# Domain: 62 rows
+Domain_organic <- strawb3 %>% filter(grepl("organic", 
+                      .$Domain, 
+                      ignore.case = T))
+
+#  Domain Category: 62 rows
+Domain_Category_organic <- strawb3 %>% filter(grepl("organic", 
+                       .$`Domain Category`, 
+                       ignore.case = T))
+
+# combine all the organic entries
+(intersect(type_organic, Domain_organic) == intersect(type_organic, Domain_Category_organic))
+
+org_rows <- intersect(type_organic, Domain_organic)
+
+strawb_organic <- left_join(org_rows, strawb3)
+
+strawb_non_organic <- anti_join(strawb3, org_rows)
+```
+
+
+Next, separate the chemical data. We start with non-organic data because they have a lot more info of chemicals than that of organic data.
+
+```{r}
+# check what could be indications of chemical data 
+(strawb_non_organic %>% select(type) %>% distinct())
+
+# the chemical data in the column "type" is in the rows where type = BEARING - Application, so we find them by matching strings 
+
+chem_rows <- strawb_non_organic%>% filter(grepl("BEARING - APPLICATIONS", 
+                      .$type, 
+                      ignore.case = T)) 
+
+# 2112 rows matches for chemical data in non-organic subset.
+
+# The column `Domain` and `Domain Category` also contain info about chemicals
+
+chem_rows_D <- strawb_non_organic%>% filter(grepl("chemical", 
+                      .$Domain, 
+                      ignore.case = T))
+chem_rows_D_C <- strawb_non_organic%>% filter(grepl("chemical", 
+                      .$`Domain Category`, 
+                      ignore.case = T))
+
+ins <- intersect(chem_rows, chem_rows_D)
+ins_2 <- intersect(chem_rows, chem_rows_D_C)
+
+# All of the row numbers in chem_rows_D and chem_rows_D_C are are in chem_rows. 
+# So it means chem_rows contain all of the chemical data.
+
+```
+
+After we get all rows of chemical data, now we can create the chemicals subset.
+```{r}
+strawb_chem <- left_join(chem_rows, strawb_non_organic)
+```
+
+
+Next, try to find how many hazardous chemicals mentioned in the "Shoppers Guide to Pesticides in Produce" exists in our dataset. Hazardous chemicals include Carbendazim, Bifenthrin, methyl bromide, 1,3-dichloropropene, chloropicrin, Telone.
+```{r}
+# carbendazim: 0 matches
+df_carbendazim <- strawb3 %>% filter(grepl("Carbendazim", .$`Domain Category`, ignore.case=TRUE))
+
+# Bifenthrin: 27 matches
+df_Bifenthrin <- strawb3 %>% filter(grepl("Bifenthrin", .$`Domain Category`, ignore.case=TRUE))
+
+# methyl bromide: 3 matches
+df_methyl_bromide <- strawb3 %>% filter(grepl("methyl bromide", .$`Domain Category`, ignore.case=TRUE))
+
+# 1,3-dichloropropene: 0 matches 
+df_1_3_dichloropropene <- strawb3 %>% filter(grepl("1,3-dichloropropene", .$`Domain Category`, ignore.case=TRUE))
+
+# chloropicrin: 18 matches
+df_chloropicrin <- strawb3 %>% filter(grepl("chloropicrin", .$`Domain Category`, ignore.case=TRUE))
+
+# Telone: 0 matches
+df_Telone <- strawb3 %>% filter(grepl("Telone", .$`Domain Category`, ignore.case=TRUE))
+```
+
+## Including Plots
