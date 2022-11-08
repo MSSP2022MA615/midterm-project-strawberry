@@ -132,26 +132,166 @@ After we get all rows of chemical data, now we can create the chemicals subset.
 strawb_chem <- left_join(chem_rows, strawb_non_organic)
 ```
 
+# Cleaning three tibbles (subsets)
 
-Next, try to find how many hazardous chemicals mentioned in the "Shoppers Guide to Pesticides in Produce" exists in our dataset. Hazardous chemicals include Carbendazim, Bifenthrin, methyl bromide, 1,3-dichloropropene, chloropicrin, Telone.
+## Chemical data subset
+Write a function to drop columns that contain useless information. 
 ```{r}
-# carbendazim: 0 matches
-df_carbendazim <- strawb3 %>% filter(grepl("Carbendazim", .$`Domain Category`, ignore.case=TRUE))
+before_cols = colnames(strawb_chem)
+  T = NULL
+  x = length(before_cols)
 
-# Bifenthrin: 27 matches
-df_Bifenthrin <- strawb3 %>% filter(grepl("Bifenthrin", .$`Domain Category`, ignore.case=TRUE))
-
-# methyl bromide: 3 matches
-df_methyl_bromide <- strawb3 %>% filter(grepl("methyl bromide", .$`Domain Category`, ignore.case=TRUE))
-
-# 1,3-dichloropropene: 0 matches 
-df_1_3_dichloropropene <- strawb3 %>% filter(grepl("1,3-dichloropropene", .$`Domain Category`, ignore.case=TRUE))
-
-# chloropicrin: 18 matches
-df_chloropicrin <- strawb3 %>% filter(grepl("chloropicrin", .$`Domain Category`, ignore.case=TRUE))
-
-# Telone: 0 matches
-df_Telone <- strawb3 %>% filter(grepl("Telone", .$`Domain Category`, ignore.case=TRUE))
+   for(i in 1:x){
+    b <- length(unlist(strawb_chem[,i] %>% unique()) )
+    T <- c(T,b)
+   }
+    
+  drop_cols <- before_cols[which(T == 1)]
+  after_strawb_chem <- strawb_chem %>% select(!all_of(drop_cols))
+  after_cols <-  colnames(after_strawb_chem)
 ```
 
-## Including Plots
+It's easy to find that after we drop some useless columns, the `units` column still contain NA values in the form of character data. Also, we need to separate Domain Category column to get a cleaner data frame.
+```{r}
+after_strawb_chem %>% select(units) %>% distinct()  # NA or AVG as row values
+
+# separate `Domain Category` column
+strawb_chem <- after_strawb_chem %>% separate(col=`Domain Category`, 
+                                    into = c("dc1", "chem_name"),
+                                    sep = ":", 
+                                    fill = "right")
+temp3 <- strawb_chem %>% select(chem_name) %>% unique()
+# number of unique rows in chem_name
+length(unlist(temp3))
+
+# Examine the `items` column. If we remove the "measured in", it actually corresponds the units. So rename units to Category and rename items to Units, and now items should only contain unit names.
+
+grep("measured in", 
+                    strawb_chem$items, 
+                    ignore.case = T) %>% length()
+
+strawb_chem$items <- str_remove_all(strawb_chem$items, "MEASURED IN ")
+
+strawb_chem<-  strawb_chem %>% rename(c(Category = units, Units = items))
+
+# check if Domain and to dc1 refers to the same thing? True
+sum(strawb_chem$Domain == strawb_chem$dc1) == dim(strawb_chem)[1]
+
+
+# select the column that is useful for further analysis
+strawb_chem <- strawb_chem %>% select(Year, State, Category, Units, dc1, chem_name, Value)
+```
+
+Now continue examining the `dc1` column. Check if every entry starts with"CHEMICAL", if so, remove it for better view.
+
+```{r}
+bb  <- grep("CHEMICAL, ", 
+            strawb_chem$dc1, 
+            ignore.case = T)
+length(bb)
+chem <- 1:2112
+
+non_chem_rows <- setdiff(chem, bb)
+length(non_chem_rows)
+
+# 45 entries starts with some other strings: FERTILIZER, keep them for now
+strawb_chem %>% slice(non_chem_rows)
+
+# Remove repeated "CHEMICAL, " and rename dc1 to Chem_type 
+strawb_chem$dc1 <- str_remove_all(strawb_chem$dc1, "CHEMICAL, ")
+
+strawb_chem$dc1 %>% unique()
+
+strawb_chem %>% rename(Chem_types = dc1)
+
+#Now clean the chem_name column. Remove parentheses and split the chem_name into chem_name and chenm_code.
+
+strawb_chem$chem_name <- str_remove_all(strawb_chem$chem_name, "\\(")
+strawb_chem$chem_name <- str_remove_all(strawb_chem$chem_name, "\\)")
+
+strawb_chem <- strawb_chem %>% separate(col = chem_name,
+                          into = c("Chem_name","Chem_code"),
+                          sep = "=",
+                          fill = "right"
+                            ) 
+```
+
+There are still some NAs in the category column, now fill in a label for NA. First, check that "lb" in the `Units` column corresponds to NA in the category column.
+```{r}
+aa <- which(strawb_chem$Units == " LB")
+
+bb <- which(is.na(strawb_chem$Category))
+
+sum(aa==bb)==length(aa)
+
+# Fill in label "AVG" for NA
+strawb_chem <- strawb_chem %>% 
+     replace(is.na(strawb_chem), "AVG")
+```
+
+The number of different chemicals listed in our dataset is 172. Since California contributes to 80% of the strawberry production and followed by Florida and Oregon, we may want to check how many different chemicals are listed by state and if California use more chemicals than other states?
+```{r}
+strawb_chem %>% select(Chem_name) %>% distinct()
+
+# number of different chemicals listed by different states
+strawb_chem %>% group_by(State) %>% summarise(unqiue_chems = n_distinct(Chem_name))
+```
+Based on the tibble above, we can say that 23 more chemicals have been used in California than in Florida, and 118 more chemicals have been used in California than that in Oregon.
+
+Next, try to find how many hazardous chemicals mentioned in the "Shoppers Guide to Pesticides in Produce" exists in our dataset. Hazardous chemicals include Carbendazim, Bifenthrin, methyl bromide, 1,3-dichloropropene, chloropicrin, Telone.
+Also, check the hazardous chemicals listed by state.
+```{r}
+# carbendazim: 0 matches
+df_carbendazim <- strawb_chem %>% filter(grepl("Carbendazim", .$Chem_name, ignore.case=TRUE))
+
+# Bifenthrin: 27 matches
+df_Bifenthrin <- strawb_chem %>% filter(grepl("Bifenthrin", .$Chem_name, ignore.case=TRUE))
+df_Bifenthrin %>% group_by(State) %>% count()
+
+# methyl bromide: 3 matches
+df_methyl_bromide <- strawb_chem  %>% filter(grepl("methyl bromide", .$Chem_name, ignore.case=TRUE))
+df_methyl_bromide %>% group_by(State) %>% count()
+
+# 1,3-dichloropropene: 0 matches 
+df_1_3_dichloropropene <- strawb_chem  %>% filter(grepl("1,3-dichloropropene", .$Chem_name, ignore.case=TRUE))
+
+# chloropicrin: 18 matches
+df_chloropicrin <- strawb_chem  %>% filter(grepl("chloropicrin", .$Chem_name, ignore.case=TRUE))
+df_chloropicrin %>% group_by(State) %>% count()
+# Telone: 0 matches
+df_Telone <- strawb_chem  %>% filter(grepl("Telone", .$Chem_name, ignore.case=TRUE))
+```
+
+Based on my research safe chemicals to use include Neem Oil and Spinosad. Check if they are in our chemical dataset.
+```{r}
+# Neem Oil: 27 matches
+df_Neem_Oil <- strawb_chem %>% filter(grepl("NEEM OIL", .$Chem_name, ignore.case=TRUE))
+
+#Spinosad: 12 matches 
+
+df_Spinosad <- strawb_chem %>% filter(grepl("SPINOSAD", .$Chem_name, ignore.case=TRUE))
+```
+
+
+## Organic and non-organic strawberry subset
+
+
+
+# Answers to Gradescope Question
+
+## Q2 Confidence Interval
+Compute a 95% confidence interval for California non-organic strawberry sales in 2016.
+
+## Q3 Confidence Interval 
+Compute a 95% confidence interval for California organic strawberry sales in 2016.
+
+## Q4 Chem Count - CA
+Q: In the data set for the MA615 Strawberry project, how many different chemicals are listed? 
+A: 139 in CALIFORNIA.
+```{r}
+strawb_chem %>% group_by(State) %>% summarise(unqiue_chems = n_distinct(Chem_name))
+```
+
+## Q5  Chem Count
+Q: On the basis of the data set for the MA615 Strawberry project, how many more chemicals have been used in California than in Florida?
+A: 23 more in CALIFORNIA than in Florida.
