@@ -29,10 +29,10 @@ Create an indicator T to check the unique values of each one of the columns, and
 T <- NULL
 for(i in x){T <- c(T, dim(unique(strawb[i]))[1])}
 drop_cols <- cnames[which(T == 1)]
-strawb %<>% select(!all_of(drop_cols))
+strawb %>% select(!all_of(drop_cols))
 
 # Arrange columns by year and state
-strawb %<>% arrange(Year, State)
+strawb %>% arrange(Year, State)
 
 ```
 
