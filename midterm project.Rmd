@@ -132,9 +132,10 @@ After we get all rows of chemical data, now we can create the chemicals subset.
 strawb_chem <- left_join(chem_rows, strawb_non_organic)
 ```
 
-# Cleaning three tibbles (subsets)
+##  Cleaning three tibbles (subsets)
 
-## Chemical data subset
+### Chemical data subset
+
 Write a function to drop columns that contain useless information. 
 ```{r}
 before_cols = colnames(strawb_chem)
@@ -164,7 +165,7 @@ temp3 <- strawb_chem %>% select(chem_name) %>% unique()
 # number of unique rows in chem_name
 length(unlist(temp3))
 
-# Examine the `items` column. If we remove the "measured in", it actually corresponds the units. So rename units to Category and rename items to Units, and now items should only contain unit names.
+# Examine the `items` column. If we remove the "measured in", it actually corresponds to the units. So rename units to Category and rename items to Units, and now items should only contain unit names.
 
 grep("measured in", 
                     strawb_chem$items, 
@@ -174,7 +175,7 @@ strawb_chem$items <- str_remove_all(strawb_chem$items, "MEASURED IN ")
 
 strawb_chem<-  strawb_chem %>% rename(c(Category = units, Units = items))
 
-# check if Domain and to dc1 refers to the same thing? True
+# check if Domain and dc1 refers to the same thing? True
 sum(strawb_chem$Domain == strawb_chem$dc1) == dim(strawb_chem)[1]
 
 
@@ -266,24 +267,160 @@ Based on my research safe chemicals to use include Neem Oil and Spinosad. Check 
 ```{r}
 # Neem Oil: 27 matches
 df_Neem_Oil <- strawb_chem %>% filter(grepl("NEEM OIL", .$Chem_name, ignore.case=TRUE))
+df_Neem_Oil %>% group_by(State) %>% count()
 
 #Spinosad: 12 matches 
-
 df_Spinosad <- strawb_chem %>% filter(grepl("SPINOSAD", .$Chem_name, ignore.case=TRUE))
+df_Spinosad %>% group_by(State) %>% count()
 ```
 
 
-## Organic and non-organic strawberry subset
+### Organic strawberry subset
+
+Starts with organic_strawb to select columns to drop
+```{r}
+before_cols = colnames(strawb_organic)
+  T = NULL
+  x = length(before_cols)
+
+   for(i in 1:x){
+    b <- length(unlist(strawb_organic[,i] %>% unique()) )
+    T <- c(T,b)
+   }
+    
+  drop_cols <- before_cols[which(T == 1)]
+  after_strawb_organic <- strawb_organic %>% select(!all_of(drop_cols))
+  after_cols <-  colnames(after_strawb_organic)
+```
+
+
+Check all entries that contain "SALES"
+```{r}
+type_sales <- grep("sales", 
+               after_strawb_organic$type, 
+               ignore.case = T) %>% length()
+
+items_sales <- grep("sales", 
+               after_strawb_organic$items, 
+               ignore.case = T) %>% length()
+
+sum(type_sales,items_sales) == dim(after_strawb_organic)[1]
+
+
+# Looking at these three columns together, we can see every row contain a "SALES".
+# It doesn't add any additional info for further analysis. So we can remove them.
+after_strawb_organic$type <- str_remove_all(after_strawb_organic$type, "- SALES")
+
+(after_strawb_organic %>% select(items) %>% unique())
+
+(after_strawb_organic %>% select(units) %>% unique())
+```
+
+By checking the unique values of the `items` and `units` column, we can found that there are something in common in these two columns. If we combine them together and then only keep units like" $" and "CWT", we can get the units corresponds to strawberries. Now we can get a clean strawb_organic data frame.
+```{r}
+# Combine items and units into one column called `Units`
+after_strawb_organic <- after_strawb_organic %>% unite(Units,items:units, remove = TRUE)
+
+# Remove "MEASURED IN", "FRESH MARKET - SALES_" and "PROCESSING - SALES_" and "_NA"
+after_strawb_organic$Units <- str_remove_all(after_strawb_organic$Units, "MEASURED IN ")
+after_strawb_organic$Units <- str_remove_all(after_strawb_organic$Units, "FRESH MARKET - SALES_")
+after_strawb_organic$Units <- str_remove_all(after_strawb_organic$Units, "PROCESSING - SALES_")
+after_strawb_organic$Units <- str_remove_all(after_strawb_organic$Units, "_NA")
+
+
+# Drop `State ANSI` column and select columns for further analysis
+strawb_organic <- after_strawb_organic %>% select(-c(`State ANSI`,type))
+
+```
+
+### non-organic strawberry subset
+
+Similar cleaning approaches for chemicals can be applied to clean non-organic strawberry subset.
+```{r}
+# Examine columns
+before_cols = colnames(strawb_non_organic)
+  T = NULL
+  x = length(before_cols)
+
+   for(i in 1:x){
+    b <- length(unlist(strawb_non_organic[,i] %>% unique()) )
+    T <- c(T,b)
+   }
+    
+  drop_cols <- before_cols[which(T == 1)]
+  after_strawb_non_organic <- strawb_non_organic %>% select(!all_of(drop_cols))
+  after_cols <-  colnames(after_strawb_non_organic)
+  
+after_strawb_non_organic %>% select(units) %>% distinct()  # NA or AVG as row values
+
+# separate `Domain Category` column
+strawb_non_organic <- after_strawb_non_organic %>% separate(col=`Domain Category`, 
+                                    into = c("dc1", "chem_name"),
+                                    sep = ":", 
+                                    fill = "right")
+
+temp4 <- strawb_non_organic %>% select(chem_name) %>% distinct()
+
+# number of unique rows in chem_name
+length(unlist(temp4))
+
+# Examine the `items` column. Check unique row values in `items` column
+strawb_non_organic %>% select(items) %>% distinct()
+
+# If we remove the "measured in", it actually corresponds to the units. So rename units to Category and rename items to Units, and now items should only contain unit names.
+grep("measured in", 
+                    strawb_non_organic$items, 
+                    ignore.case = T) %>% length()
+
+
+strawb_non_organic$items <- str_remove_all(strawb_non_organic$items, "MEASURED IN ")
+
+strawb_non_organic<-  strawb_non_organic %>% rename(c(Category = units, Units = items))
+
+# check if Domain and dc1 refers to the same thing? FALSE
+sum(strawb_non_organic$Domain == strawb_non_organic$dc1) == dim(strawb_non_organic)[1]
+
+# now check how many rows of the `Domain` and `dc1` column are not the same: 60 rows
+temp5 <- strawb_non_organic[which(strawb_non_organic$Domain != strawb_non_organic$dc1),]
+dim(temp5)[1]
+
+# Need to keep these 60 rows because they have value for `Value` column
+
+# Select the column that is useful for further analysis
+strawb_non_organic <- strawb_non_organic %>% select(Year, State, Category, Units, Domain, dc1, chem_name, Value)
+```
+
 
 
 
 # Answers to Gradescope Question
 
 ## Q2 Confidence Interval
-Compute a 95% confidence interval for California non-organic strawberry sales in 2016.
+Compute a 95% confidence interval for California organic strawberry sales in 2016.
+```{r}
+strawb_organic$Value <- as.integer(strawb_organic$Value)
+table1 <- strawb_organic %>% filter(Year == "2016" & State == "CALIFORNIA") 
+
+# resale the CWT 
+table1$Value[2] <- table1$Value[2]*100
+table1$Value[4] <- table1$Value[4]*100
+table1$Value[6] <- table1$Value[6]*100
+
+n <- dim(table1)[1]
+xbar <- mean(table1$Value)
+s <- sd(table1$Value)
+
+margin <- qt(0.975,df=n-1)*s/sqrt(n)
+
+CI_95_organic <- c(lowerinterval = xbar - margin, upperinterval = xbar + margin)
+CI_95_organic
+```
 
 ## Q3 Confidence Interval 
-Compute a 95% confidence interval for California organic strawberry sales in 2016.
+Compute a 95% confidence interval for California non-organic strawberry sales in 2016.
+```{r}
+
+```
 
 ## Q4 Chem Count - CA
 Q: In the data set for the MA615 Strawberry project, how many different chemicals are listed? 
@@ -294,4 +431,4 @@ strawb_chem %>% group_by(State) %>% summarise(unqiue_chems = n_distinct(Chem_nam
 
 ## Q5  Chem Count
 Q: On the basis of the data set for the MA615 Strawberry project, how many more chemicals have been used in California than in Florida?
-A: 23 more in CALIFORNIA than in Florida.
+A: 23 more in CALIFORNIA than in Florida based on the tibble above.
